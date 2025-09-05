@@ -78,4 +78,4 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Service runs on http://localhost:5000# pdf-extraction-service
+Service runs on http://localhost:5000
