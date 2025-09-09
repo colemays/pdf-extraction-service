@@ -26,22 +26,60 @@ def extract_pdf():
         data = request.json
         
         if not data or 'fileBuffer' not in data:
+            logger.error("Missing fileBuffer in request")
             return jsonify({
                 "error": "Missing fileBuffer in request", 
                 "status": "error"
             }), 400
         
-        # Decode base64 PDF
-        logger.info("Processing PDF extraction request")
-        file_buffer = base64.b64decode(data['fileBuffer'])
+        file_name = data.get('fileName', 'unknown.pdf')
+        logger.info(f"Processing PDF extraction request for: {file_name}")
+        
+        # Validate and decode base64 PDF
+        try:
+            file_buffer = base64.b64decode(data['fileBuffer'])
+            logger.info(f"Decoded base64 buffer, size: {len(file_buffer)} bytes")
+        except Exception as decode_error:
+            logger.error(f"Failed to decode base64: {str(decode_error)}")
+            return jsonify({
+                "error": f"Invalid base64 data: {str(decode_error)}", 
+                "status": "error"
+            }), 400
+        
+        # Validate PDF header
+        if len(file_buffer) < 10:
+            logger.error(f"File too small: {len(file_buffer)} bytes")
+            return jsonify({
+                "error": f"File too small: {len(file_buffer)} bytes", 
+                "status": "error"
+            }), 400
+            
+        header = file_buffer[:10].decode('ascii', errors='ignore')
+        logger.info(f"PDF header: {repr(header)}")
+        
+        if not header.startswith('%PDF'):
+            logger.error(f"Invalid PDF header: {repr(header)}")
+            return jsonify({
+                "error": f"Invalid PDF header: {repr(header)}", 
+                "status": "error"
+            }), 400
+        
+        # Create BytesIO object
         pdf_file = BytesIO(file_buffer)
         
         # Extract text using PyPDF2
-        pdf_reader = PyPDF2.PdfReader(pdf_file)
-        total_pages = len(pdf_reader.pages)
-        extracted_text = ""
+        try:
+            pdf_reader = PyPDF2.PdfReader(pdf_file)
+            total_pages = len(pdf_reader.pages)
+            logger.info(f"PDF loaded successfully, {total_pages} pages")
+        except Exception as reader_error:
+            logger.error(f"PyPDF2 failed to read PDF: {str(reader_error)}")
+            return jsonify({
+                "error": f"PDF reading failed: {str(reader_error)}", 
+                "status": "error"
+            }), 400
         
-        logger.info(f"PDF has {total_pages} pages")
+        extracted_text = ""
         
         # Process each page
         for page_num, page in enumerate(pdf_reader.pages, 1):
@@ -71,12 +109,12 @@ def extract_pdf():
             "totalPages": total_pages,
             "wordCount": word_count,
             "characterCount": char_count,
-            "fileName": data.get('fileName', 'unknown.pdf'),
+            "fileName": file_name,
             "status": "success"
         })
     
     except Exception as e:
-        logger.error(f"Error processing PDF: {str(e)}")
+        logger.error(f"Unexpected error processing PDF: {str(e)}")
         return jsonify({
             "error": f"PDF processing failed: {str(e)}", 
             "status": "error"
