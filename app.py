@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 import PyPDF2
 import pdfplumber
+import fitz  # PyMuPDF
 import base64
 from io import BytesIO
 import logging
@@ -130,13 +131,44 @@ def extract_pdf():
                             continue
                             
             except Exception as pdfplumber_error:
-                logger.error(f"Both PyPDF2 and pdfplumber failed")
-                logger.error(f"PyPDF2 error: {str(pypdf_error)}")
-                logger.error(f"pdfplumber error: {str(pdfplumber_error)}")
-                return jsonify({
-                    "error": f"PDF reading failed with both libraries. PyPDF2: {str(pypdf_error)}. pdfplumber: {str(pdfplumber_error)}", 
-                    "status": "error"
-                }), 400
+                logger.warning(f"pdfplumber also failed: {str(pdfplumber_error)}, trying PyMuPDF...")
+                
+                try:
+                    # Try PyMuPDF as final fallback
+                    pdf_document = fitz.open(stream=file_buffer, filetype="pdf")
+                    total_pages = len(pdf_document)
+                    logger.info(f"PyMuPDF: PDF loaded successfully, {total_pages} pages")
+                    extraction_method = "PyMuPDF"
+                    
+                    for page_num in range(total_pages):
+                        try:
+                            page = pdf_document.load_page(page_num)
+                            page_text = page.get_text()
+                            
+                            if page_text and page_text.strip():
+                                extracted_text += f"\n=== Page {page_num + 1} ===\n"
+                                extracted_text += page_text.strip()
+                                extracted_text += "\n\n"
+                            
+                            # Log progress for large PDFs
+                            if (page_num + 1) % 20 == 0:
+                                logger.info(f"Processed {page_num + 1}/{total_pages} pages")
+                                
+                        except Exception as page_error:
+                            logger.warning(f"PyMuPDF error on page {page_num + 1}: {str(page_error)}")
+                            continue
+                    
+                    pdf_document.close()
+                    
+                except Exception as pymupdf_error:
+                    logger.error(f"All three PDF libraries failed")
+                    logger.error(f"PyPDF2 error: {str(pypdf_error)}")
+                    logger.error(f"pdfplumber error: {str(pdfplumber_error)}")
+                    logger.error(f"PyMuPDF error: {str(pymupdf_error)}")
+                    return jsonify({
+                        "error": f"PDF reading failed with all libraries. PyPDF2: {str(pypdf_error)}. pdfplumber: {str(pdfplumber_error)}. PyMuPDF: {str(pymupdf_error)}", 
+                        "status": "error"
+                    }), 400
         
         # Calculate some basic stats
         word_count = len(extracted_text.split()) if extracted_text else 0
